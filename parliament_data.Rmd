@@ -15,16 +15,19 @@ knitr::opts_chunk$set(echo = FALSE)
 
 First, we retrieve the primary data from Parliament's API, including oral and written questions. Since the api is constantly updated with the latest questions asked, we set an end date of 31/12/2023 to keep results consistent through different runs.
 
-By running the request in the API development hub, there are a total of 30878 entries of oral questions and 490441 entries of written questions. We set the take parameter to the maximum limit of 100 and loop through the entries by increasing the skip parameter.
+By running the request in the API development hub, there are a total of 30878 entries of oral questions and 490441 entries of written questions. For oral questions, we set the take parameter to the maximum limit of 100 and loop through the entries by increasing the skip parameter. For written questions, there is no stated limit of the take parameter but through experimentation, setting the take parameter to 10000 strikes the balance between stability and speed. However, due to the large number of requests for written questions, the response sometimes unpredictably returns an error. To resolve this issue, we check the status code of each response, when it returns of a status code that is not 200, the programme will break from the current loop and print the request URL and its parameters that trigger the error. We can then manually adjust the skip parameter to continue the loop from the last successful request.
 
 The oral and written question APIs differ slightly in field names and in field content. In each oral question asked, there is a field detailing the information of the MP who asked the question, however, in written questions, this field is empty. To keep the the data consistent, we will only keep the MP Id for each question for now, and retrieve the MP information in the next step using the MP API. To reduce data size, we will also only keep the following columns: Id, QuestionText, TabledWhen, AnsweringBodyId, AskingMemberId, AnsweringBody for both oral and written questions.
+
+After retrieving the final tibbles, we will save the to .rds files for future use.
+
 ```{r retrieve_primary_data, eval=FALSE}
 
 library(httr)
 library(jsonlite)
 library(tidyverse)
 
-# set the base url and end date
+# set the base URL and end date
 end_date <- "2023-12-31"
 base_url_oral <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list"
 take <- 100
@@ -52,7 +55,7 @@ for (i in 0:(num_request - 1)) {
   Sys.sleep(1) # sleep for 1 second to avoid rate limit
 }
 
-# base url for written questions
+# base URL for written questions
 base_url_written <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions"
 written_take <- 10000
 written_response <- 490441 # by observing the API response
@@ -65,7 +68,7 @@ written_tibble <- tibble()
 options(scipen = 999)
 
 # loop through request to build the written tibble
-for (i in 0:(written_request - 1)) {
+for (i in 49:(written_request - 1)) {
   skip <- i * written_take
   query <- sprintf("%s?tabledWhenTo=%s&skip=%s&take=%s", base_url_written, end_date, skip, written_take)
   print(query)
@@ -78,19 +81,45 @@ for (i in 0:(written_request - 1)) {
   }
   r_json <- fromJSON(rawToChar(r$content))
   r_tibble <- as_tibble(r_json$results$value) |> 
-    select(id, questionText, dateTabled, answeringBodyId, answeringBodyName) # select key rows
+    select(id, questionText, dateTabled, answeringBodyId, answeringBodyName, askingMemberId) # select key rows
   written_tibble <- written_tibble |> bind_rows(r_tibble) # append to overall tibble
+  print(i)
   Sys.sleep(5) # sleep for 5 seconds to avoid rate limit
 }
-
+View(written_tibble)
 # save both tibbles in .rds formats
 saveRDS(oral_tibble, "data/oral_tibble.rds")
 saveRDS(written_tibble, "data/written_tibble.rds")
 
 ```
 
+### MP Information
 
-```{r convert_json_to_tibble}
+Each question within the two tables above contains the MP Id of the MP who asked the question. We will use this information to retrieve the MP information from the MP API. We will follow the steps below to retrieve the MP information:
+
+1.  Create a list of all unique MP Ids that appear in the two tibbles
+2.  Loop through the list of MP Ids and retrieve the MP information
+
+
+``` {r retrieve_mp_data}
+# create a list of all unique MP Ids
+
+# read the two tibbles from the .rds files
+oral_tibble <- readRDS("data/oral_tibble.rds")
+written_tibble <- readRDS("data/written_tibble.rds")
+
+head(written_tibble)
+
+# create a list of all unique MP Ids
+oral_mp_ids <- oral_tibble$AskingMemberId |> unique()
+written_mp_ids <- written_tibble$askingMemberId |> unique()
+mp_ids <- c(oral_mp_ids, written_mp_ids) |> unique()
+length(written_mp_ids)
+
+# create a new tibble to store MP information
+mp_tibble <- tibble()
+
+# loop through MP ids and retrieve MP information using the MP API
 
 ```
 

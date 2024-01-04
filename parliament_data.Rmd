@@ -68,7 +68,7 @@ written_tibble <- tibble()
 options(scipen = 999)
 
 # loop through request to build the written tibble
-for (i in 49:(written_request - 1)) {
+for (i in 0:(written_request - 1)) {
   skip <- i * written_take
   query <- sprintf("%s?tabledWhenTo=%s&skip=%s&take=%s", base_url_written, end_date, skip, written_take)
   print(query)
@@ -86,7 +86,7 @@ for (i in 49:(written_request - 1)) {
   print(i)
   Sys.sleep(5) # sleep for 5 seconds to avoid rate limit
 }
-View(written_tibble)
+
 # save both tibbles in .rds formats
 saveRDS(oral_tibble, "data/oral_tibble.rds")
 saveRDS(written_tibble, "data/written_tibble.rds")

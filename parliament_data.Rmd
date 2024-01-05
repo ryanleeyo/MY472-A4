@@ -93,33 +93,140 @@ saveRDS(written_tibble, "data/written_tibble.rds")
 
 ```
 
+### Filtering and Classifying Questions
+
+Now we have the oral and written questions, we need to differentiate questions that are about economic issues and questions about health and welfare issues. First, we merge oral and written tibbles and add one column to store if each question is oral or written
+
+There can be many strategies when it comes to filter the questions that are useful for our purpose. The most straightforward way is to filter the questions based on the answering bodies they are addressed to. However, dividing the questions purely based on the answering body proves to be less effective. This is largely because there are a total of 52 answering bodies and many of them do not have a clear focus on either economic or health and welfare issues. However, there are departments that are dedicated towards economic issues and health and welfare issues. They are:
+
+|                                        |                                                            |
+|----------------------------------------|------------------------------------------------------------|
+| Economics related Departments          | Treasury, HM Treasury, Department for Business and Trade   |
+| Health and Welfare related Departments | Department of Health and Social Care, Department of Health |
+
+```{r filtering_and_classifying_questions}
+# read the two tibbles from the .rds files
+oral_tibble <- readRDS("data/oral_tibble.rds")
+written_tibble <- readRDS("data/written_tibble.rds")
+
+# merge two tibbles and add a column to indicate if the question is oral or written
+oral_tibble <- oral_tibble |> mutate(QuestionType = "oral") 
+written_tibble <- written_tibble |> mutate(QuestionType = "written")
+# update the column names of written tibble to match oral tibble
+colnames(written_tibble) <- c("Id", "QuestionText", "TabledWhen", "AnsweringBodyId", "AnsweringBody", "AskingMemberId", "QuestionType" )
+# merge the two tibbles
+questions_tibble <- oral_tibble |> bind_rows(written_tibble)
+
+# create a list of all unique answering bodies
+answer_body <- questions_tibble |> distinct(AnsweringBody) |> pull(AnsweringBody)
+answer_body
+
+# for each answerbody, how many questions are addressed
+questions_tibble |> 
+  group_by(AnsweringBody) |> 
+  summarise(NumQuestions = n()) |> 
+  arrange(desc(NumQuestions))
+
+# print 100 questions from Department of Health and Social Care
+questions_tibble |> 
+  filter(AnsweringBody == "Department of Health and Social Care") |> 
+  select(QuestionText) |> 
+  head(100)
+```
+
 ### MP Information
 
 Each question within the two tables above contains the MP Id of the MP who asked the question. We will use this information to retrieve the MP information from the MP API. We will follow the steps below to retrieve the MP information:
 
-1.  Create a list of all unique MP Ids that appear in the two tibbles
-2.  Loop through the list of MP Ids and retrieve the MP information
+1.  Merge oral and written tibbles and add one column to store if each question is oral or written
+2.  Create a list of all unique MP Ids from the merged tibble
+3.  Create a function to retrieve target MP info from various MP API endpoints
 
+We retrieve the following information for each MP:
 
-``` {r retrieve_mp_data}
+| Information Retrieved                                     | Members API Used                      |
+|-------------------------------------------|-----------------------------|
+| Displayed Name, Gender, Latest Party, Constituency, House | /api/Members/{id}                     |
+| Registered Interest                                       | /api/Members/{id}/RegisteredInterests |
+| Areas of Focus                                            | /api/Members/{id}/Focus               |
+
+```{r retrieve_mp_data}
 # create a list of all unique MP Ids
 
 # read the two tibbles from the .rds files
 oral_tibble <- readRDS("data/oral_tibble.rds")
 written_tibble <- readRDS("data/written_tibble.rds")
 
-head(written_tibble)
+# merge two tibbles and add a column to indicate if the question is oral or written
+oral_tibble <- oral_tibble |> mutate(QuestionType = "oral") 
+written_tibble <- written_tibble |> mutate(QuestionType = "written")
+# update the column names of written tibble to match oral tibble
+colnames(written_tibble) <- c("Id", "QuestionText", "TabledWhen", "AnsweringBodyId", "AnsweringBody", "AskingMemberId", "QuestionType" )
+# merge the two tibbles
+questions_tibble <- oral_tibble |> bind_rows(written_tibble)
 
 # create a list of all unique MP Ids
-oral_mp_ids <- oral_tibble$AskingMemberId |> unique()
-written_mp_ids <- written_tibble$askingMemberId |> unique()
-mp_ids <- c(oral_mp_ids, written_mp_ids) |> unique()
-length(written_mp_ids)
+mp_ids <- questions_tibble |> distinct(AskingMemberId) |> pull(AskingMemberId)
 
 # create a new tibble to store MP information
 mp_tibble <- tibble()
+# create a function to retrieve a single MP's information
+base_url_mp <- "https://members-api.parliament.uk/api/Members"
 
-# loop through MP ids and retrieve MP information using the MP API
+test_url <- "https://members-api.parliament.uk/api/Members/4598/RegisteredInterests"
+r <- GET(test_url)
+r_json <- fromJSON(rawToChar(r$content))
+r_json$value$nameDisplayAs
+r_json$value$gender
+r_json$value$latestParty$name
+r_json$value$latestHouseMembership$house
+latestHouseMembership$membershipFrom
+r_json$value$name
+
+retrieve_mp_info <- function(mp_id, base_url) {
+  
+  # a result variable to keep track of the success of current MP call
+  fail <- NULL
+  
+  # initialize all target variables to NA
+  Name <- NA
+  Gender <- NA
+  LatestParty <- NA
+  Membership <- NA
+  House <- NA
+  RegisteredInterest <- NA
+  Focus <- NA
+  
+  # first retrieve the Displayed Name, Gender, Latest Party, Membership, House
+  query_one <- sprintf("%s/%s", base_url, mp_id)
+  r_one <- GET(query)
+  if (status_code(r_one) == 200) {
+    r_json <- fromJSON(rawToChar(r_one$content))
+    Gender <- r_json$value$gender
+    Name <- r_json$value$nameDisplayAs
+    LatestParty <- r_json$value$latestParty$name
+    Membership <- r_json$value$latestHouseMembership$membershipFrom
+    House <- r_json$value$latestHouseMembership$house
+  } else {
+    print("Error")
+    fail <- mp_id
+  }
+  
+  # then retrieve the Registered Interest
+  query_two <- sprintf("%s/%s/RegisteredInterests", base_url, mp_id)
+  r_two <- GET(query_two)
+  if (status_code(r_two) == 200) {
+    r_json <- fromJSON(rawToChar(r_two$content))
+    RegisteredInterest <- r_json$value$name
+  } else {
+    print("Error")
+    fail <- mp_id
+  }
+  
+  # then retrieve the Areas of Focus
+  query_three <- sprintf("%s/%s/Focus", base_url, mp_id)
+  
+}
 
 ```
 

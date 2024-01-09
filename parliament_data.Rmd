@@ -9,6 +9,10 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE) 
 ```
 
+## Introduction
+
+## Data
+
 ## Part One: Retrieving Primary Data from UK Parliament API
 
 ### Oral and Written Questions
@@ -412,13 +416,99 @@ mp_tibble <- mp_tibble[-1, ]
 mp_tibble <- mp_tibble |> rename(AskingMemberId = AskingMemberID)
 
 ```
-### Combine Tibble and Clean Up 
-Now we combine both tibble with the AskingMemberId Column. We will use the left_join function to combine the two tibbles. The left_join function will keep all rows of the primary tibble and add the columns of the secondary tibble to the primary tibble. We will then remove the AskingMemberId column from the primary tibble.
-``` {r combine_tibble}
-primary_tibble <- questions_tibble |> 
+
+### Combine Tibble and Clean Up
+
+Now we combine both tibble with the AskingMemberId Column. We will use the left_join function to combine the two tibbles. The left_join function will keep all rows of the primary tibble and add the columns of the secondary tibble to the primary tibble. Save the tibble file to the data folder.
+
+We then perform some clean up to streamline the tibble and reduce the size of the tibble. These steps include:
+
+1.  Delete columns Id, QuestionText, AnsweringBodyID, AskingMemberID, AnsweringBody. These columns are not needed for the analysis and by deleting them, we can work with a tibble much smaller in size. The tibble that does contain all these columns are saved in the data folder for future use.
+2.  Convert TabledWhen chr format to a datetime format
+3.  Remove the rows with IssueType = "Other" as these rows are not relevant to the analysis.
+
+```{r combine_clean_tibble}
+primary_tibble <- questions_tibble |>
   left_join(mp_tibble, by = "AskingMemberId")
 primary_tibble
+# Save the primary tibble to data folder
+saveRDS(primary_tibble, "data/primary_tibble.rds")
+
+# Delete columns Id, QuestionText, AnsweringBodyID, AskingMemberID, AnsweringBody
+lite_tibble <- primary_tibble |> 
+  select(-Id, -QuestionText, -AnsweringBodyId, -AskingMemberId, -AnsweringBody)
+
+# Convert TabledWhen chr format to a datetime format and only keep the month and year of the date
+lite_tibble <- lite_tibble |> 
+  mutate(TabledWhen = as.Date(TabledWhen, format = "%Y-%m-%d"))
+
+# Remove the rows with IssueType = "Other"
+lite_tibble <- lite_tibble |> filter(IssueType != "Other")
+
+# Change the colname TabledWhen to Date
+lite_tibble <- lite_tibble |> rename(Date = TabledWhen)
 ```
+
+## Part Two: Retrieving Secondary Data
+
+### FTSE100 Data and GDP Data
+
+``` {r retrieve_secondary_data}
+# import the FTSE100 Historical data and the quarterly GDP data from csv files in the data folder
+ftse100 <- read_csv("data/FTSE100.csv", show_col_types = FALSE)
+gdp <- read_csv("data/GDP.csv", show_col_types = FALSE)
+
+# convert the date column of the FTSE100 data to a date format that matches that of the lite tibble
+ftse100 <- ftse100 |> 
+  mutate(Date = as.Date(Date, format = "%d/%m/%Y")) |> 
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d"))
+
+# add one column "FTSEChange" to the ftse100 data, if column Change% is a number larger or equal than 0, Change = 1, else Change = 0 (this is done by detecting the "-" character)
+ftse100 <- ftse100 |> 
+  mutate(FTSEChange = ifelse(str_detect(`Change %`, "-"), 0, 1))
+# Keep only the FTSEChange and Date Columns
+ftse100 <- ftse100 |> select(FTSEChange, Date)
+
+
+# delete the first 7 rows of the gdp data (they were notes about the dataset)
+gdp <- gdp[-c(1:7), ]
+
+# add one column "GDPChange" to the gdp data, if c olumn "Gross Domestic Product: Quarter on Quarter growth: CVM SA %" is a number larger or equal than 0, Change = 1, else Change = 0 (this is done by detecting the "-" character)
+gdp <- gdp |> 
+  mutate(GDPChange = ifelse(str_detect(`Gross Domestic Product: Quarter on Quarter growth: CVM SA %`, "-"), 0, 1))
+
+# Keep only the GDPChange and Title Columns
+gdp <- gdp |> select(GDPChange, Title) |> 
+  rename(Quarter = Title)
+
+# Merge data with the lite tibble
+lite_tibble <- lite_tibble |> 
+  left_join(ftse100, by = "Date")
+
+# use lubridate to add a column "Quarter" to the lite tibble
+lite_tibble <- lite_tibble |> 
+  mutate(Quarter = quarter(Date, with_year = TRUE))
+
+# convert the Quarter column to a character format
+lite_tibble <- lite_tibble |> 
+  mutate(Quarter = as.character(Quarter))
+
+# for each Quarter, replace the "." with a " Q"
+lite_tibble <- lite_tibble |> 
+  mutate(Quarter = str_replace(Quarter, "\\.", " Q"))
+
+# merge the lite tibble with the gdp data
+lite_tibble <- lite_tibble |> 
+  left_join(gdp, by = "Quarter")
+
+# delete the Quarter column
+lite_tibble <- lite_tibble |> 
+  select(-Quarter)
+```
+
+## Part Three: Analysis and Visualisation
+
+## Analysis
 
 ```{r read_json_files}
 ## Appendix: All code in this assignment

@@ -123,6 +123,7 @@ oral_tibble <- oral_tibble |> mutate(QuestionType = "oral")
 written_tibble <- written_tibble |> mutate(QuestionType = "written")
 # update the column names of written tibble to match oral tibble
 colnames(written_tibble) <- c("Id", "QuestionText", "TabledWhen", "AnsweringBodyId", "AnsweringBody", "AskingMemberId", "QuestionType" )
+
 # merge the two tibbles
 questions_tibble <- oral_tibble |> bind_rows(written_tibble)
 
@@ -176,7 +177,7 @@ health_welfare_keywords <- c(
 library(tm)
 # get the tibble rows with NA IssueType and perform standard text preprocessing
 # remove punctuation, numbers and convert to lower case
-questions_tibble <- questions_tibble |> 
+untagged_tibble <- questions_tibble |> 
   filter(is.na(IssueType)) |> 
   mutate(QuestionText = str_remove_all(QuestionText, "[[:punct:]]")) |> 
   mutate(QuestionText = str_remove_all(QuestionText, "[[:digit:]]")) |> 
@@ -202,24 +203,28 @@ categorise_questions <- function(text, keywords_one, keywords_two) {
 }
 
 # perform categorise function (This step may take longer to run)
-questions_tibble <- questions_tibble |> 
-  filter(is.na(IssueType)) |>
+untagged_tibble <- untagged_tibble |> 
   mutate(IssueType = sapply(QuestionText, categorise_questions, economic_keywords, health_welfare_keywords))
-
-# print the counts of each category
-questions_tibble |> 
-  group_by(IssueType) |> 
-  summarise(count = n())
+untagged_tibble
 # Step 5, Duplicate "Pending" questions
 # filter the tibble to get the questions marked as "Pending"
-pending_questions <- questions_tibble |> 
-  filter(IssueType == "Pending") |> 
-  # duplicate each row and change the IssueType to "Economic" and "Health and Welfare"
-  slice(rep(1:n(), each = 2)) |>
+pending_questions <- untagged_tibble |> 
+  filter(IssueType == "Pending")
+# duplicate each row and change the IssueType to "Economic" and "Health and Welfare"
+pending_questions <- pending_questions |>
+  slice(rep(1:n(), each = 2))
+pending_questions <- pending_questions |>
   mutate(IssueType = rep(c("Economic", "Health and Welfare"), length.out = nrow(pending_questions)))
   
-  
-  
+# combine pending questions with tagged tibble
+tagged_tibble <- untagged_tibble |> 
+  filter(IssueType != "Pending") |> 
+  bind_rows(pending_questions)
+
+# combine tagged tibble with the questions tibble
+questions_tibble <- questions_tibble |> 
+  filter(!is.na(IssueType)) |> 
+  bind_rows(tagged_tibble)
 ```
 
 ### MP Information
@@ -345,45 +350,54 @@ saveRDS(mp_tibble, "data/mp_tibble.rds")
 
 ### Clean up the MP Data
 
-Now we perform some clean up to the MP data. The tibble now has multiple rows for MPs with more than one registered interests, each row records one registered interest of a single MP. We will merge the rows of the same MP and combine the registered interests into one column. We are interested in interest category of the MPs' registered interests. Hence, when combining each row, we record the interest category number for each MP and put all numbers into a list. The category number is entailed in the name of the registered interest, either before the "." symbol or after the word "category". We will use this logic to extract the category number.
+Now we perform some clean up to the MP data. The tibble now has multiple rows for MPs with more than one registered interests, each row records one registered interest of a single MP. We will merge the rows of the same MP and combine the registered interests into one column. We are interested in interest category of the MPs' registered interests. Hence, when combining each row, we record the interest category number for each MP and put all numbers into a string. The category number is entailed in the name of the registered interest, either before the "." symbol or after the word "category". We will use this logic to extract the category number.
+
+N.B. When collapsing the list into a string, NA values are transformed to the literal string of NA, hence in the final stage, we will replace strings of NA with actual NA values.
 
 ```{r clean_mp_data}
 
 # read the mp tibble from the .rds file
 mp_tibble <- readRDS("data/mp_tibble.rds")
 
-# for each mp id, put all registered interests into a list and collapse the rows
+# for each mp id, put all registered interests into a list and collapse the rows, then unnest the list
 mp_tibble <- mp_tibble |> 
   group_by(AskingMemberID) |> 
   mutate(RegisteredInterest = list(RegisteredInterest)) |> # combine all registered interests into a list
-  distinct(AskingMemberID, .keep_all = TRUE) # remove duplicated rows
+  distinct(AskingMemberID, .keep_all = TRUE)  # remove duplicated rows
+  
+# collapse the list into a single string
+mp_tibble <- mp_tibble |> 
+  mutate(RegisteredInterest = map_chr(RegisteredInterest, ~paste(., collapse = ", "))) |> 
+  unnest(cols = c(RegisteredInterest)) # unnest the list
 
-
-# print the registeredInterest of mp with askingmember id of 116
-mp_tibble[mp_tibble$AskingMemberID == 116, ]$RegisteredInterest
-library(stringr)
-# a function to convert the list of characters to a list of numbers (retrieving category number)
+# a function to convert the string to a string of numbers (retrieving category number)
 convert_to_number <- function(x) {
+  
+  # if the field is NA, return NA
+  if (x == "NA") {
+    return(NA)
+  }
+  
   # initialize a list to store the numbers
   numbers <- list()
-  # loop through each element in the list
-  for (i in 1:length(x)) {
-    # category number is either before the dot or after the word "category"
-    match <- str_extract(x[i], "Category\\s*\\d+|category\\s*\\d+")
-    if (!is.na(match)) {
-      number <- str_extract(match, "\\d+")
-      numbers <- c(numbers, number)
-    } else {
-      match <- str_extract(text, pattern = "\\d+\\.")
-      if (!is.na(match)) {
-        # Removing the dot for the final result
-        number <- str_remove(match, "\\.")
-        numbers <- c(numbers, number)
-      }
-    }
+  
+  # find all occurrences of the pattern "category" followed by a number
+  category_matches <- str_extract_all(x, "Category\\s\\d+")
+  for (match in category_matches) {
+    number <- str_extract(match, "\\d+")
+    numbers <- c(numbers, number)
   }
-  # delete duplicates of the list
-  numbers <- unique(numbers)
+  
+  # find all occurrences of the pattern number followed by a "."
+  dot_matches <- str_extract_all(x, "\\d+\\.")
+  for (match in dot_matches) {
+    number <- str_extract(match, "\\d+")
+    numbers <- c(numbers, number)
+  }
+  
+  # delete duplicates of the list and convert to a string
+  numbers <- numbers |> unique() |> paste(collapse = ", ")
+  
   # return the list of numbers
   return(numbers)
 }
@@ -391,6 +405,19 @@ convert_to_number <- function(x) {
 # apply the function to each RegisteredInterest Row of the tibble
 mp_tibble <- mp_tibble |> mutate(RegisteredInterest = sapply(RegisteredInterest, convert_to_number))
 
+# delete the first row that is empty
+mp_tibble <- mp_tibble[-1, ]
+
+# change mptibble column name AskingMemberID
+mp_tibble <- mp_tibble |> rename(AskingMemberId = AskingMemberID)
+
+```
+### Combine Tibble and Clean Up 
+Now we combine both tibble with the AskingMemberId Column. We will use the left_join function to combine the two tibbles. The left_join function will keep all rows of the primary tibble and add the columns of the secondary tibble to the primary tibble. We will then remove the AskingMemberId column from the primary tibble.
+``` {r combine_tibble}
+primary_tibble <- questions_tibble |> 
+  left_join(mp_tibble, by = "AskingMemberId")
+primary_tibble
 ```
 
 ```{r read_json_files}

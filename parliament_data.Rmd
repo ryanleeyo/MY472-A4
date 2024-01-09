@@ -434,6 +434,7 @@ primary_tibble
 # Save the primary tibble to data folder
 saveRDS(primary_tibble, "data/primary_tibble.rds")
 
+primary_tibble <- readRDS("data/primary_tibble.rds")
 # Delete columns Id, QuestionText, AnsweringBodyID, AskingMemberID, AnsweringBody
 lite_tibble <- primary_tibble |> 
   select(-Id, -QuestionText, -AnsweringBodyId, -AskingMemberId, -AnsweringBody)
@@ -504,8 +505,94 @@ lite_tibble <- lite_tibble |>
 # delete the Quarter column
 lite_tibble <- lite_tibble |> 
   select(-Quarter)
-```
 
+# do a groupby for each column and count the number of rows for each group
+lite_tibble |> 
+  group_by(RegisteredInterest) |> 
+  summarise(Count = n())
+
+# count the number of rows with no RegisteredInterest
+lite_tibble |> 
+  filter(is.na(RegisteredInterest)) |> 
+  summarise(Count = n())
+
+# Create columns in lite tibble for each RegisteredInterest (10 in total)
+lite_tibble <- lite_tibble |> 
+  mutate(RegisteredInterest1 = ifelse(str_detect(RegisteredInterest, "1"), 1, 0)) |> 
+  mutate(RegisteredInterest2 = ifelse(str_detect(RegisteredInterest, "2"), 1, 0)) |> 
+  mutate(RegisteredInterest3 = ifelse(str_detect(RegisteredInterest, "3"), 1, 0)) |> 
+  mutate(RegisteredInterest4 = ifelse(str_detect(RegisteredInterest, "4"), 1, 0)) |> 
+  mutate(RegisteredInterest5 = ifelse(str_detect(RegisteredInterest, "5"), 1, 0)) |> 
+  mutate(RegisteredInterest6 = ifelse(str_detect(RegisteredInterest, "6"), 1, 0)) |> 
+  mutate(RegisteredInterest7 = ifelse(str_detect(RegisteredInterest, "7"), 1, 0)) |> 
+  mutate(RegisteredInterest8 = ifelse(str_detect(RegisteredInterest, "8"), 1, 0)) |> 
+  mutate(RegisteredInterest9 = ifelse(str_detect(RegisteredInterest, "9"), 1, 0)) |> 
+  mutate(RegisteredInterest10 = ifelse(str_detect(RegisteredInterest, "10"), 1, 0))
+
+# delete the RegisteredInterest column
+lite_tibble <- lite_tibble |> 
+  select(-RegisteredInterest)
+
+# print all columns of the lite tibble
+lite_tibble |> 
+  names()
+
+```
+### Scrape wikipedia page to get the region for each constituency
+``` {r scrape_wikipedia}
+
+library(rvest)
+
+url <- "https://en.wikipedia.org/wiki/Constituencies_of_the_Parliament_of_the_United_Kingdom"
+html_content <- rvest::read_html(url)
+
+tables <- html_table(html_content, fill = TRUE)
+
+# by observation, table 5, 6, 7, 8 are England, Scotland, Wales, Northern Ireland respectively
+table_england <- tables[[5]]
+table_scotland <- tables[[6]]
+table_wales <- tables[[7]]
+table_northern_ireland <- tables[[8]]
+
+# get constituency columns of Scotland, Wales, Northern Ireland
+constituency_scotland <- table_scotland |> 
+  select(Constituency) |> 
+  mutate(Region = "Scotland")
+
+constituency_wales <- table_wales |>
+  select(Constituency) |> 
+  mutate(Region = "Wales")
+
+constituency_northern_ireland <- table_northern_ireland |>
+  select(Constituency) |> 
+  mutate(Region = "Northern Ireland")
+
+# get constituency columns and Region of England, bind the rows of the 4 tables
+constituency_region <- table_england |> 
+  select(Constituency, Region) |>
+  rbind(constituency_scotland) |>
+  rbind(constituency_wales) |>
+  rbind(constituency_northern_ireland) |> 
+  # change the Column name to Membership match the lite tibble
+  rename(Membership = Constituency)
+
+# join the table with the lite tibble 
+lite_tibble <- lite_tibble |> 
+  left_join(constituency_region, by = "Membership")
+
+# groupby region and count the number of rows for each group
+lite_tibble |> 
+  group_by(Region) |> 
+  summarise(Count = n())
+
+# get all columns of the lite tibble
+lite_tibble |> 
+  names()
+
+
+# convert columns to categorical variables
+
+```
 ## Part Three: Analysis and Visualisation
 
 ## Analysis

@@ -6,7 +6,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 
-knitr::opts_chunk$set(echo = FALSE) 
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE) 
 ```
 
 ## Introduction
@@ -25,75 +25,80 @@ The oral and written question APIs differ slightly in field names and in field c
 
 After retrieving the final tibbles, we will save the to .rds files for future use.
 
-```{r retrieve_primary_data, eval=FALSE}
+```{r retrieve_primary_data}
 
 library(httr)
 library(jsonlite)
 library(tidyverse)
 
-# set the base URL and end date
-end_date <- "2023-12-31"
-base_url_oral <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list"
-take <- 100
-num_response <- 30878
-num_request <- ceiling(num_response / take) # number of times to loop through the request
-
-# set the tibble to store all the results from each run
-oral_tibble <- tibble()
-
-# loop through request to build the oral tibble
-for (i in 0:(num_request - 1)) {
-  skip <- i * take
-  query <- sprintf("%s?parameters.answeringDateEnd=%s&parameters.skip=%s&parameters.take=%s", base_url_oral, end_date, skip, take)
-  r <- GET(query)
-  # check if the query is successful, print the parameters for unsuccessful queries
-  if (status_code(r) != 200) {
-    print("Error")
-    print(skip)
-    break
+# scraping code below is commented out due to extremely long run time
+if (FALSE) {
+  
+  # set the base URL and end date
+  end_date <- "2023-12-31"
+  base_url_oral <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list"
+  take <- 100
+  num_response <- 30878
+  num_request <- ceiling(num_response / take) # number of times to loop through the request
+  
+  # set the tibble to store all the results from each run
+  oral_tibble <- tibble()
+  
+  # loop through request to build the oral tibble
+  for (i in 0:(num_request - 1)) {
+    skip <- i * take
+    query <- sprintf("%s?parameters.answeringDateEnd=%s&parameters.skip=%s&parameters.take=%s", base_url_oral, end_date, skip, take)
+    r <- GET(query)
+    # check if the query is successful, print the parameters for unsuccessful queries
+    if (status_code(r) != 200) {
+      print("Error")
+      print(skip)
+      break
+    }
+    r_json <- fromJSON(rawToChar(r$content))
+    r_tibble <- as_tibble(r_json$Response) |> 
+      select(Id, QuestionText, TabledWhen, AnsweringBodyId, AskingMemberId, AnsweringBody) # select key rows
+    oral_tibble <- oral_tibble |> bind_rows(r_tibble) # append to overall tibble
+    Sys.sleep(1) # sleep for 1 second to avoid rate limit
   }
-  r_json <- fromJSON(rawToChar(r$content))
-  r_tibble <- as_tibble(r_json$Response) |> 
-    select(Id, QuestionText, TabledWhen, AnsweringBodyId, AskingMemberId, AnsweringBody) # select key rows
-  oral_tibble <- oral_tibble |> bind_rows(r_tibble) # append to overall tibble
-  Sys.sleep(1) # sleep for 1 second to avoid rate limit
-}
-
-# base URL for written questions
-base_url_written <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions"
-written_take <- 10000
-written_response <- 490441 # by observing the API response
-written_request <- ceiling(written_response / written_take) # number of times to loop through the request
-
-# set the tibble to store all the results from each run
-written_tibble <- tibble()
-
-# suppress scientific notation
-options(scipen = 999)
-
-# loop through request to build the written tibble
-for (i in 0:(written_request - 1)) {
-  skip <- i * written_take
-  query <- sprintf("%s?tabledWhenTo=%s&skip=%s&take=%s", base_url_written, end_date, skip, written_take)
-  print(query)
-  r <- GET(query)
-  # check if the query is successful, print the parameters for unsuccessful queries
-  if (status_code(r) != 200) {
-    print("Error")
-    print(skip)
-    break
-  }
-  r_json <- fromJSON(rawToChar(r$content))
-  r_tibble <- as_tibble(r_json$results$value) |> 
-    select(id, questionText, dateTabled, answeringBodyId, answeringBodyName, askingMemberId) # select key rows
-  written_tibble <- written_tibble |> bind_rows(r_tibble) # append to overall tibble
-  print(i)
-  Sys.sleep(5) # sleep for 5 seconds to avoid rate limit
+  
+  # base URL for written questions
+  base_url_written <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions"
+  written_take <- 10000
+  written_response <- 490441 # by observing the API response
+  written_request <- ceiling(written_response / written_take) # number of times to loop through the request
+  
+  # set the tibble to store all the results from each run
+  written_tibble <- tibble()
+  
+  # suppress scientific notation
+  options(scipen = 999)
+  
+  # loop through request to build the written tibble
+  for (i in 0:(written_request - 1)) {
+    skip <- i * written_take
+    query <- sprintf("%s?tabledWhenTo=%s&skip=%s&take=%s", base_url_written, end_date, skip, written_take)
+    print(query)
+    r <- GET(query)
+    # check if the query is successful, print the parameters for unsuccessful queries
+    if (status_code(r) != 200) {
+      print("Error")
+      print(skip)
+      break
+    }
+    r_json <- fromJSON(rawToChar(r$content))
+    r_tibble <- as_tibble(r_json$results$value) |> 
+      select(id, questionText, dateTabled, answeringBodyId, answeringBodyName, askingMemberId) # select key rows
+    written_tibble <- written_tibble |> bind_rows(r_tibble) # append to overall tibble
+    print(i)
+    Sys.sleep(5) # sleep for 5 seconds to avoid rate limit
 }
 
 # save both tibbles in .rds formats
 saveRDS(oral_tibble, "data/oral_tibble.rds")
 saveRDS(written_tibble, "data/written_tibble.rds")
+}
+
 
 ```
 
@@ -209,7 +214,7 @@ categorise_questions <- function(text, keywords_one, keywords_two) {
 # perform categorise function (This step may take longer to run)
 untagged_tibble <- untagged_tibble |> 
   mutate(IssueType = sapply(QuestionText, categorise_questions, economic_keywords, health_welfare_keywords))
-untagged_tibble
+
 # Step 5, Duplicate "Pending" questions
 # filter the tibble to get the questions marked as "Pending"
 pending_questions <- untagged_tibble |> 
@@ -280,76 +285,80 @@ mp_tibble <- tibble(
   RegisteredInterest = NA
 )
 
-# create a function to retrieve a single MP's information
-base_url <- "https://members-api.parliament.uk/api/Members"
-
-failed_ids <- list()
-
-# loop through all mp ids and retrieve MP's info, fill in the tibble
-for (mp_id in mp_ids) {
+# api calls commented out due to long run time
+if (FALSE) {
+  # create a function to retrieve a single MP's information
+  base_url <- "https://members-api.parliament.uk/api/Members"
   
-  # a result variable to keep track of the success of current MP call
-  fail <- NA
+  failed_ids <- list()
   
-  # initialize all target variables to NA
-  AskingMemberID <- mp_id
-  Name <- NA
-  Gender <- NA
-  LatestParty <- NA
-  Membership <- NA
-  House <- NA
-  RegisteredInterest <- NA
-  
-  # first retrieve the Displayed Name, Gender, Latest Party, Membership, House
-  query_one <- sprintf("%s/%s", base_url, mp_id)
-  r_one <- GET(query_one)
-  if (status_code(r_one) == 200) {
-    r_json <- fromJSON(rawToChar(r_one$content))
-    Gender <- r_json$value$gender
-    Name <- r_json$value$nameDisplayAs
-    LatestParty <- r_json$value$latestParty$name
-    Membership <- r_json$value$latestHouseMembership$membershipFrom
-    House <- r_json$value$latestHouseMembership$house
-  } else {
-    print("Error")
-    fail <- mp_id
+  # loop through all mp ids and retrieve MP's info, fill in the tibble
+  for (mp_id in mp_ids) {
+    
+    # a result variable to keep track of the success of current MP call
+    fail <- NA
+    
+    # initialize all target variables to NA
+    AskingMemberID <- mp_id
+    Name <- NA
+    Gender <- NA
+    LatestParty <- NA
+    Membership <- NA
+    House <- NA
+    RegisteredInterest <- NA
+    
+    # first retrieve the Displayed Name, Gender, Latest Party, Membership, House
+    query_one <- sprintf("%s/%s", base_url, mp_id)
+    r_one <- GET(query_one)
+    if (status_code(r_one) == 200) {
+      r_json <- fromJSON(rawToChar(r_one$content))
+      Gender <- r_json$value$gender
+      Name <- r_json$value$nameDisplayAs
+      LatestParty <- r_json$value$latestParty$name
+      Membership <- r_json$value$latestHouseMembership$membershipFrom
+      House <- r_json$value$latestHouseMembership$house
+    } else {
+      print("Error")
+      fail <- mp_id
+    }
+    
+    # check_failure
+    if (!is.na(fail)) {
+      # add fail to failed_ids
+      failed_ids <- c(failed_ids, fail)
+      next
+    } 
+    
+    # then retrieve the Registered Interest
+    query_two <- sprintf("%s/%s/RegisteredInterests", base_url, mp_id)
+    r_two <- GET(query_two)
+    if (status_code(r_two) == 200) {
+      r_json <- fromJSON(rawToChar(r_two$content))
+      RegisteredInterest <- r_json$value$name
+    } else {
+      print("Error")
+      fail <- mp_id
+    }
+    
+    # check failure
+     if (!is.na(fail)) {
+       # add fail to failed_ids
+      failed_ids <- c(failed_ids, fail)
+      next
+     } 
+    
+    mp_tibble <- add_row(mp_tibble, AskingMemberID = AskingMemberID, Name = Name, Gender = Gender,
+                         LatestParty = LatestParty, Membership = Membership, 
+                         House = House, RegisteredInterest = RegisteredInterest)
+    
+    # print success message followed by mp id
+    print(sprintf("Success for ID%s", mp_id))
   }
   
-  # check_failure
-  if (!is.na(fail)) {
-    # add fail to failed_ids
-    failed_ids <- c(failed_ids, fail)
-    next
-  } 
-  
-  # then retrieve the Registered Interest
-  query_two <- sprintf("%s/%s/RegisteredInterests", base_url, mp_id)
-  r_two <- GET(query_two)
-  if (status_code(r_two) == 200) {
-    r_json <- fromJSON(rawToChar(r_two$content))
-    RegisteredInterest <- r_json$value$name
-  } else {
-    print("Error")
-    fail <- mp_id
-  }
-  
-  # check failure
-   if (!is.na(fail)) {
-     # add fail to failed_ids
-    failed_ids <- c(failed_ids, fail)
-    next
-   } 
-  
-  mp_tibble <- add_row(mp_tibble, AskingMemberID = AskingMemberID, Name = Name, Gender = Gender,
-                       LatestParty = LatestParty, Membership = Membership, 
-                       House = House, RegisteredInterest = RegisteredInterest)
-  
-  # print success message followed by mp id
-  print(sprintf("Success for ID%s", mp_id))
+  # save the mp tibble to data folder
+  saveRDS(mp_tibble, "data/mp_tibble.rds")
 }
 
-# save the mp tibble to data folder
-saveRDS(mp_tibble, "data/mp_tibble.rds")
 ```
 
 ### Clean up the MP Data
@@ -454,7 +463,7 @@ lite_tibble <- lite_tibble |> rename(Date = TabledWhen)
 
 ### FTSE100 Data and GDP Data
 
-``` {r retrieve_secondary_data}
+```{r retrieve_secondary_data}
 # import the FTSE100 Historical data and the quarterly GDP data from csv files in the data folder
 ftse100 <- read_csv("data/FTSE100.csv", show_col_types = FALSE)
 gdp <- read_csv("data/GDP.csv", show_col_types = FALSE)
@@ -506,16 +515,6 @@ lite_tibble <- lite_tibble |>
 lite_tibble <- lite_tibble |> 
   select(-Quarter)
 
-# do a groupby for each column and count the number of rows for each group
-lite_tibble |> 
-  group_by(RegisteredInterest) |> 
-  summarise(Count = n())
-
-# count the number of rows with no RegisteredInterest
-lite_tibble |> 
-  filter(is.na(RegisteredInterest)) |> 
-  summarise(Count = n())
-
 # Create columns in lite tibble for each RegisteredInterest (10 in total)
 lite_tibble <- lite_tibble |> 
   mutate(RegisteredInterest1 = ifelse(str_detect(RegisteredInterest, "1"), 1, 0)) |> 
@@ -533,13 +532,12 @@ lite_tibble <- lite_tibble |>
 lite_tibble <- lite_tibble |> 
   select(-RegisteredInterest)
 
-# print all columns of the lite tibble
-lite_tibble |> 
-  names()
 
 ```
+
 ### Scrape wikipedia page to get the region for each constituency
-``` {r scrape_wikipedia}
+
+```{r scrape_wikipedia}
 
 library(rvest)
 
@@ -580,26 +578,265 @@ constituency_region <- table_england |>
 lite_tibble <- lite_tibble |> 
   left_join(constituency_region, by = "Membership")
 
-# groupby region and count the number of rows for each group
-lite_tibble |> 
-  group_by(Region) |> 
-  summarise(Count = n())
-
-# get all columns of the lite tibble
-lite_tibble |> 
-  names()
 
 
-# convert columns to categorical variables
+
+# Include the Lord Membership in Region
+# find all rows where Region is NA
+modify_region <- lite_tibble |> 
+  filter(is.na(Region)) |> 
+  mutate(Region = Membership)
+# combine two tibbles
+lite_tibble <- lite_tibble |> 
+  filter(!is.na(Region)) |> 
+  bind_rows(modify_region)
+
+# convert all columns to categorical variables aside from "Date", "Name" using a loop
+for (i in 1:ncol(lite_tibble)) {
+  if (names(lite_tibble)[i] != "Date" & names(lite_tibble)[i] != "Name") {
+    lite_tibble[[i]] <- as.factor(lite_tibble[[i]])
+  }
+}
 
 ```
+
 ## Part Three: Analysis and Visualisation
 
-## Analysis
+## Data Exploration and Visualisation for Binary Factors
 
-```{r read_json_files}
+```{r data_exploration_binary_factors}
+
+# Create the horizontal line to show the overall ratio of Economic and Health/Welfare related questions
+overall_ratio <- lite_tibble |> 
+  group_by(IssueType) |> 
+  summarise(overall_ratio = n()) |> 
+  mutate(overall_ratio = overall_ratio / sum(overall_ratio))
+
+# get overall_ratio when IssueType is "Health/Welfare"
+overall_ratio_health <- overall_ratio |> 
+  filter(IssueType == "Health and Welfare")
+
+# define horizontal line
+horizontal_line <- 
+  geom_hline(yintercept = overall_ratio_health$overall_ratio, linetype = "dashed", color = "black") 
+  
+
+# Visualise the ratio of Economics and Health/Welfare related questions over Gender
+  
+gender <- ggplot(lite_tibble, aes(x = Gender, fill = IssueType)) +
+  geom_bar(position = "fill", width = 0.5) +
+  labs(title = "Issue Type Distribution by Gender", x = "Gender", y = "Issue Type Distributin") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  horizontal_line +
+  geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+
+
+# Visualise the ratio of Economics and Health/Welfare related questions over House
+
+house <- ggplot(lite_tibble, aes(x = House, fill = IssueType)) +
+  geom_bar(position = "fill", width = 0.5) +
+  labs(title = "Issue Type Distribution by House", x = "House", y = "Issue Type Distributin") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  horizontal_line +
+  geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+  
+# Visualise the ratio of Economics and Health/Welfare related questions over QuestionType
+
+type <- ggplot(lite_tibble, aes(x = QuestionType, fill = IssueType)) +
+  geom_bar(position = "fill", width = 0.5) +
+  labs(title = "Issue Type Distribution by Question Type", x = "Question Type", y = "Issue Type Distributin") + 
+  # miminalistic theme
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  horizontal_line +
+  geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+
+# Visualise the ratio of Economics and Health/Welfare related questions over FTSEChange
+
+# select non-NA rows
+FTSE <- lite_tibble |> 
+  filter(!is.na(FTSEChange)) |> 
+  ggplot(aes(x = FTSEChange, fill = IssueType)) +
+    geom_bar(position = "fill", width = 0.5) +
+    labs(title = "Issue Type Distribution by FTSE Change", x = "FTSE100 Change", y = "Issue Type Distributin") + 
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    horizontal_line +
+    geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+
+# Visualise the ratio of Economics and Health/Welfare related questions over GDPChange
+
+GDP <- lite_tibble |> 
+  filter(!is.na(GDPChange)) |> 
+  ggplot(aes(x = GDPChange, fill = IssueType)) +
+    geom_bar(position = "fill", width = 0.5) +
+    labs(title = "Issue Type Distribution by GDP Change", x = "GDP Change", y = "Issue Type Distributin") + 
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    horizontal_line +
+    geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+
+# Visualise the ratio of Economics and Health/Welfare related questions over Region
+
+# get the order of regions
+prop_health <- lite_tibble |> 
+  group_by(Region) |> 
+  summarise(health_proportion = sum(IssueType == "Health and Welfare") / n())
+
+ordered_regions <- prop_health |> 
+  arrange(desc(health_proportion)) |> 
+  pull(Region)
+
+# assign the order to the factor
+lite_tibble$Region <- factor(lite_tibble$Region, levels = ordered_regions)
+
+region <- lite_tibble |> 
+  filter(!is.na(Region)) |> 
+  ggplot(aes(x = Region, fill = IssueType)) +
+    geom_bar(position = "fill", width = 0.5) +
+    labs(title = "Issue Type Distribution by Region", x = "Region", y = "Issue Type Distributin") + 
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # rotate x axis text 
+    horizontal_line +
+    geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+region
+# Visualise the ratio of Economics and Health/Welfare related questions over Party
+
+# get the order of parties, delete rows with less than 100 counts
+prop_health <- lite_tibble |> 
+  filter(!is.na(LatestParty)) |> 
+  group_by(LatestParty) |> 
+  filter(n() > 100) |> 
+  summarise(health_proportion = sum(IssueType == "Health and Welfare") / n())
+ordered_parties <- prop_health |>
+  arrange(desc(health_proportion)) |> 
+  pull(LatestParty)
+
+# assign the order to the factor
+lite_tibble$LatestParty <- factor(lite_tibble$LatestParty, levels = ordered_parties)
+
+party <- lite_tibble |> 
+  filter(!is.na(LatestParty)) |> 
+  ggplot(aes(x = LatestParty, fill = IssueType)) +
+    geom_bar(position = "fill", width = 0.5) +
+    labs(title = "Issue Type Distribution by Party", x = "Party", y = "Issue Type Distributin") + 
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # rotate x axis text
+    horizontal_line +
+    geom_text(aes(x = 0.1, y = overall_ratio_health$overall_ratio + 0.03, label = "Overall Ratio"), hjust = 0)
+party
+# Visualise the ratio of Economics and Health/Welfare related questions over the RegisteredInterest1
+
+graph_list <- list()
+
+for (i in 1:10) {
+  col_name <- paste0("RegisteredInterest", i)
+  category_name <- paste0("Category ", i)
+  title <- paste0("Issue Type Distribution by ", category_name, " Interest")
+  graph <- lite_tibble |> 
+    filter(!is.na(!!sym(col_name))) |>
+    ggplot(aes(x = !!sym(col_name), fill = IssueType)) +
+      geom_bar(position = "fill", width = 0.5) +
+      labs(title = title, x = category_name, y = "Issue Type Distributin") + 
+      theme_minimal() +
+      theme(plot.title = element_text(hjust = 0.5)) +
+      horizontal_line 
+  graph_list[[i]] <- graph
+} 
+
+# display each graph in the graph list
+for (i in 1:10) {
+  print(graph_list[[i]])
+}
+
+# Visualise the ratio of Economics and Health/Welfare related questions over Year
+
+# add a Year Column to the lite_tibble
+lite_tibble$Year <- year(lite_tibble$Date)
+
+# convert Year to a factor
+lite_tibble$Year <- factor(lite_tibble$Year)
+
+# groupby year 
+year <- lite_tibble |> 
+  ggplot(aes(x = Year, fill = IssueType)) +
+    geom_bar(position = "fill", width = 0.5) +
+    labs(title = "Health and Welfare Issue Type Proportion over Year", x = "Year", y = "Proportion") + 
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    horizontal_line 
+```
+
+## Chi-Squared Test for Features
+
+\``{r chi_squared_test} # suppress scientific notation options(scipen = 999) chisq.test(lite_tibble$IssueType, lite_tibble$Gender)$p.value chisq.test(lite_tibble$IssueType, lite_tibble$House)$p.value chisq.test(lite_tibble$IssueType, lite_tibble$)$p.value` \
+## Predictive Modelling
+
+```{r predictive_modelling}
+# install.packages("randomForest")
+# install.packages("caret")
+# install.packages("ranger")
+library(randomForest)
+library(caret)
+
+
+# delete NA value rows for Random Forest
+cleaned_tibble <- lite_tibble %>%
+  na.omit(c(QuestionType, Gender, LatestParty, Region, House, FTSEChange, GDPChange))
+
+# split data into training and testing
+set.seed(123)
+training_indices <- sample(1:nrow(cleaned_tibble), 0.7 * nrow(cleaned_tibble))
+train_data <- cleaned_tibble[training_indices, ]
+test_data <- cleaned_tibble[-training_indices, ]
+
+# build a random forest model
+rf_model <- randomForest(IssueType ~ QuestionType + Gender + LatestParty + Region + House + FTSEChange + GDPChange,
+                         data = train_data, 
+                         na.action = na.exclude,  # Exclude NA values
+                         importance = TRUE)
+
+
+predictions <- predict(rf_model, test_data)
+conf_matrix <- confusionMatrix(predictions, test_data$IssueType)
+accuracy <- conf_matrix$overall["Accuracy"]
+precision <- conf_matrix$byClass['Precision']
+recall <- conf_matrix$byClass['Recall']
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# print the results
+print(conf_matrix)
+
+# feature importance
+varImpPlot(rf_model, sort = TRUE, n.var = 7, main = "Features Importance")
+```
+
+```{r predictive_modelling}
+```
+
+```{r predictive_modelling}
+```
+## Predictive Modelling
+
+```{r predictive_modelling}
+# Include the Lord Membership in Region
+# find all rows where Region is NA
+modify_region <- lite_tibble |> 
+  filter(is.na(Region)) |> 
+  mutate(Region = Membership)
+# combine two tibbles
+lite_tibble <- lite_tibble |> 
+  filter(!is.na(Region)) |> 
+  bind_rows(modify_region)
+
+```
 ## Appendix: All code in this assignment
 
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
 # this chunk generates the complete code appendix. 
 # eval=FALSE tells R not to run (``evaluate'') the code here (it was already run before).
 ```

@@ -8,3 +8,5 @@ When you run the R programme, please download the entire repository including th
 If you were to run API calls, change FALSE to TRUE. Running API calls will take hours and occasional crashes due to server-side errors are expected.
 
 Detailed data processing steps and explanations are included in the comments of code blocks.
+
+### Thank you very much for your time
